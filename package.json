@@ -9,6 +9,7 @@
     "hardhat": "^2.10.1"
   },
   "dependencies": {
-    "@thirdweb-dev/contracts": "^3"
+    "@thirdweb-dev/contracts": "^3",
+    "@uniswap/v2-periphery": "^1.1.0-beta.0"
   }
 }
