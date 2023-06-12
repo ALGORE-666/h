@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity 0.8.18;
 
 import "@thirdweb-dev/contracts/base/ERC20Base.sol";
 import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
@@ -17,6 +17,8 @@ contract CreamPaiToken is ERC20Base {
     string private _symbol = "PAI";
     uint8 private _decimals = 18;
     uint256 private _supply = 69000000000;
+
+
     uint256 public taxForLiquidity = 47;
     uint256 public sellTaxForMarketing = 47;
     uint256 public buyTaxForMarketing = 47;
@@ -25,6 +27,8 @@ contract CreamPaiToken is ERC20Base {
     address public marketingWallet = 0x7Dd8271a9441f4dd9D6344571a626ec9fC167972;
     address public DEAD = 0x000000000000000000000000000000000000dEaD;
     uint256 public _marketingReserves = 0;
+
+    
     mapping(address => bool) public _isExcludedFromFee;
     uint256 public numTokensSellToAddToLiquidity = 1380000 * 10 ** _decimals;
     uint256 public numTokensSellToAddToETH = 690000 * 10 ** _decimals;
@@ -75,10 +79,10 @@ contract CreamPaiToken is ERC20Base {
     }
 
     function updatePair(address _pair) external onlyOwner {
-        require(_pair != DEAD, "LP Pair cannot be the Dead wallet, or 0!");
+        require(_pair != DEAD, "LP Pair cannot be DEAD");
         require(
             _pair != address(0),
-            "LP Pair cannot be the Dead wallet, or 0!"
+            "LP Pair cannot be 0!"
         );
         uniswapV2Pair = _pair;
         emit PairUpdated(_pair);
@@ -95,11 +99,11 @@ contract CreamPaiToken is ERC20Base {
         address to,
         uint256 amount
     ) internal override {
-        require(from != address(0), "ERC20: transfer from the zero address");
-        require(to != address(0), "ERC20: transfer to the zero address");
+        require(from != address(0), "Cannot transfer to 0");
+        require(to != address(0), "Cannot transfer from 0");
         require(
             balanceOf(from) >= amount,
-            "ERC20: transfer amount exceeds balance"
+            "Amount exceeds balance"
         );
 
         if(whitelisted[from] || whitelisted[to]){
@@ -230,10 +234,10 @@ contract CreamPaiToken is ERC20Base {
     function changeMarketingWallet(
         address newWallet
     ) public onlyOwner returns (bool) {
-        require(newWallet != DEAD, "LP Pair cannot be the Dead wallet, or 0!");
+        require(newWallet != DEAD, "LP Pair cannot be DEAD");
         require(
             newWallet != address(0),
-            "LP Pair cannot be the Dead wallet, or 0!"
+            "LP Pair cannot be 0"
         );
         marketingWallet = newWallet;
         return true;
@@ -246,11 +250,11 @@ contract CreamPaiToken is ERC20Base {
     ) public onlyOwner returns (bool) {
         require(
             (_taxForLiquidity + _buyTaxForMarketing) <= 10,
-            "ERC20: total tax must not be greater than 10%"
+            "Max tax is 10%"
         );
         require(
             (_taxForLiquidity + _sellTaxForMarketing) <= 10,
-            "ERC20: total tax must not be greater than 10%"
+            "Max tax is 10%"
         );
         taxForLiquidity = _taxForLiquidity;
         buyTaxForMarketing = _buyTaxForMarketing;
@@ -265,11 +269,11 @@ contract CreamPaiToken is ERC20Base {
     ) public onlyOwner returns (bool) {
         require(
             _numTokensSellToAddToLiquidity < _supply / 98,
-            "Cannot liquidate more than 2% of the supply at once!"
+            "Max 2% of total supply"
         );
         require(
             _numTokensSellToAddToETH < _supply / 98,
-            "Cannot liquidate more than 2% of the supply at once!"
+            "Max 2% of total supply"
         );
         numTokensSellToAddToLiquidity =
             _numTokensSellToAddToLiquidity *
