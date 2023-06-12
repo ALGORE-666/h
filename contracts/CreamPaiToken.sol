@@ -5,46 +5,57 @@ import "@thirdweb-dev/contracts/base/ERC20Base.sol";
 import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
 import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol";
 
-/*
- * Website: https://creampai.org
- * Litepaper: https://creampai-org.gitbook.io/creampai/
- * Twitter: https://twitter.com/Real_CreamPAI
- * Telegram: t.me/real_creampai
- * OnlyFans: https://onlyfans.com/real_creampai
-*/
+
+// Website: https://creampai.org
+// Litepaper: https://creampai-org.gitbook.io/creampai/
+// Twitter: https://twitter.com/Real_CreamPAI
+// Telegram: https://t.me/CreamPAI_Portal
+// OnlyFans: https://onlyfans.com/real_creampai
 contract CreamPaiToken is ERC20Base {
     string private _name = "CreamPAI";
     string private _symbol = "PAI";
     uint8 private _decimals = 18;
     uint256 private _supply = 69000000000;
 
+    address public marketingWallet = 0x6Fe13903740d78296D70252f8498d4B82f1fA671;
+    address public DEAD = 0x000000000000000000000000000000000000dEaD;
 
+    // Taxes
     uint256 public taxForLiquidity = 47;
     uint256 public sellTaxForMarketing = 47;
     uint256 public buyTaxForMarketing = 47;
-    uint256 public maxTxAmount = 690000000 * 10 ** _decimals;
-    uint256 public maxWalletAmount = 690000000 * 10 ** _decimals;
-    address public marketingWallet = 0x7Dd8271a9441f4dd9D6344571a626ec9fC167972;
-    address public DEAD = 0x000000000000000000000000000000000000dEaD;
-    uint256 public _marketingReserves = 0;
-
-    
-    mapping(address => bool) public _isExcludedFromFee;
     uint256 public numTokensSellToAddToLiquidity = 1380000 * 10 ** _decimals;
     uint256 public numTokensSellToAddToETH = 690000 * 10 ** _decimals;
+    uint256 public _marketingReserves;
+
+    // Max tx/wallet amounts
+    uint256 public maxTxAmount = 690000000 * 10 ** _decimals;
+    uint256 public maxWalletAmount = 690000000 * 10 ** _decimals;
+    event MarketingWalletUpdated(address _address);
+    event MaxWalletAmountUpdated(uint256 _amount);
+    event MaxTransactionAmountUpdated(uint256 _amount);
+    event TaxUpdated(
+        uint256 _taxForLiquidity,
+        uint256 _buyTaxForMarketing,
+        uint256 _sellTaxForMarketing
+    );
+
+    // Whitelisting
+    mapping(address => bool) public _isExcludedFromFee;
     event ExcludedFromFeeUpdated(address _address, bool _status);
-    event PairUpdated(address _address);
 
-    mapping (address => bool) public whitelisted;
-    bool public publicTradingActive = false;
-    event SetWhitelisted(address _address, bool _isExempt);
-    event PublicTradingStarted();
-
-    
+    // Uniswap controls
     IUniswapV2Router02 public immutable uniswapV2Router;
     address public uniswapV2Pair;
+    bool public publicTradingActive;
+    event PairUpdated(address _address);
+    event PublicTradingStarted();
+    event SwapThresholdUpdated(
+        uint256 _numTokensSellToAddToLiquidity,
+        uint256 _numTokensSellToAddToETH
+    );
 
-    bool inSwapAndLiquify;
+    bool private inSwapAndLiquify;
 
     event SwapAndLiquify(
         uint256 tokensSwapped,
@@ -58,7 +69,8 @@ contract CreamPaiToken is ERC20Base {
         inSwapAndLiquify = false;
     }
 
-    constructor() ERC20Base(_name, _symbol) {
+    // Contructor
+    constructor() payable ERC20Base(_name, _symbol) {
         _mint(msg.sender, (_supply * 10 ** _decimals));
 
         IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(
@@ -73,27 +85,17 @@ contract CreamPaiToken is ERC20Base {
         _isExcludedFromFee[address(this)] = true;
         _isExcludedFromFee[msg.sender] = true;
         _isExcludedFromFee[marketingWallet] = true;
-
-        whitelisted[msg.sender] = true;
-        whitelisted[address(this)] = true;
     }
 
+    // Update uniswap pair to check and tax
     function updatePair(address _pair) external onlyOwner {
         require(_pair != DEAD, "LP Pair cannot be DEAD");
-        require(
-            _pair != address(0),
-            "LP Pair cannot be 0!"
-        );
+        require(_pair != address(0), "LP Pair cannot be 0!");
         uniswapV2Pair = _pair;
         emit PairUpdated(_pair);
     }
 
-    function setWhitelisted(address _address, bool _isWhitelisted) external onlyOwner {
-        require(_address != address(0), "Zero Address");
-        whitelisted[_address] = _isWhitelisted;
-        emit SetWhitelisted(_address, _isWhitelisted);
-    }
-
+    // Transfer and tax logic
     function _transfer(
         address from,
         address to,
@@ -101,21 +103,22 @@ contract CreamPaiToken is ERC20Base {
     ) internal override {
         require(from != address(0), "Cannot transfer to 0");
         require(to != address(0), "Cannot transfer from 0");
-        require(
-            balanceOf(from) >= amount,
-            "Amount exceeds balance"
-        );
+        require(balanceOf(from) >= amount, "Amount exceeds balance");
 
-        if(whitelisted[from] || whitelisted[to]){
-            super._transfer(from,to,amount);
+        // Whitelisted addresses
+        if (_isExcludedFromFee[from] || _isExcludedFromFee[to]) {
+            super._transfer(from, to, amount);
             return;
         }
 
         require(publicTradingActive, "Trading not active");
 
+        // If coming from or going to uniswap pair
         if (
             (from == uniswapV2Pair || to == uniswapV2Pair) && !inSwapAndLiquify
         ) {
+            // If token sale, swap taxed tokens stored in this contract 
+            // for eth, then send to marketing wallet and add liquidity
             if (from != uniswapV2Pair) {
                 uint256 contractLiquidityBalance = balanceOf(address(this)) -
                     _marketingReserves;
@@ -132,60 +135,65 @@ contract CreamPaiToken is ERC20Base {
                 }
             }
 
-            uint256 transferAmount;
-            if (_isExcludedFromFee[from] || _isExcludedFromFee[to]) {
-                transferAmount = amount;
-            } else {
+            require(amount <= maxTxAmount, "Max transaction amount exceeded");
+
+            // If token purchase, check max wallet amount
+            if (from == uniswapV2Pair) {
                 require(
-                    amount <= maxTxAmount,
-                    "ERC20: transfer amount exceeds the max transaction amount"
-                );
-                if (from == uniswapV2Pair) {
-                    require(
-                        (amount + balanceOf(to)) <= maxWalletAmount,
-                        "ERC20: balance amount exceeded max wallet amount limit"
-                    );
-                }
-                uint256 taxForMarketing = 0;
-
-                // token purchase
-                if (from == uniswapV2Pair) {
-                    taxForMarketing = buyTaxForMarketing;
-                } 
-                // token sale
-                else if (to == uniswapV2Pair) {
-                    taxForMarketing = sellTaxForMarketing;
-                }
-
-                uint256 marketingShare = ((amount * taxForMarketing) / 100);
-                uint256 liquidityShare = ((amount * taxForLiquidity) / 100);
-                transferAmount = amount - (marketingShare + liquidityShare);
-                _marketingReserves += marketingShare;
-
-                super._transfer(
-                    from,
-                    address(this),
-                    (marketingShare + liquidityShare)
+                    (amount + balanceOf(to)) <= maxWalletAmount,
+                    "Max wallet amount exceeded"
                 );
             }
+
+            uint256 taxForMarketing = 0;
+
+            // token purchase
+            if (from == uniswapV2Pair) {
+                taxForMarketing = buyTaxForMarketing;
+            }
+            // token sale
+            else if (to == uniswapV2Pair) {
+                taxForMarketing = sellTaxForMarketing;
+            }
+
+            // Calculate taxes
+            uint256 marketingShare = ((amount * taxForMarketing) / 100);
+            uint256 liquidityShare = ((amount * taxForLiquidity) / 100);
+            uint256 transferAmount = amount - (marketingShare + liquidityShare);
+
+            // Transfer tax amount to this contract
+            super._transfer(
+                from,
+                address(this),
+                (marketingShare + liquidityShare)
+            );
+
+            // Update marketing reserves with marketing tax
+            // portion of tokens transferred to this contract
+            _marketingReserves += marketingShare;
+
+            // Transfer remaining non-taxed amount
             super._transfer(from, to, transferAmount);
         } else {
             super._transfer(from, to, amount);
         }
     }
 
+    // Enable public trading
     function enablePublicTrading() external onlyOwner {
         publicTradingActive = true;
         emit PublicTradingStarted();
     }
 
+    // Exclude address from fee
     function excludeFromFee(address _address, bool _status) external onlyOwner {
         _isExcludedFromFee[_address] = _status;
         emit ExcludedFromFeeUpdated(_address, _status);
     }
 
+    // Swap tokens and add liquidiy to uniswap pair
     function _swapAndLiquify(uint256 contractTokenBalance) private lockTheSwap {
-        uint256 half = (contractTokenBalance / 2);
+        uint256 half = contractTokenBalance >> 1;
         uint256 otherHalf = (contractTokenBalance - half);
 
         uint256 initialBalance = address(this).balance;
@@ -199,6 +207,7 @@ contract CreamPaiToken is ERC20Base {
         emit SwapAndLiquify(half, newBalance, otherHalf);
     }
 
+    // Swap tokens for eth using the uniswap pair
     function _swapTokensForEth(uint256 tokenAmount) private lockTheSwap {
         address[] memory path = new address[](2);
         path[0] = address(this);
@@ -215,6 +224,7 @@ contract CreamPaiToken is ERC20Base {
         );
     }
 
+    // Add liquidiy to uniswap pair
     function _addLiquidity(
         uint256 tokenAmount,
         uint256 ethAmount
@@ -231,42 +241,50 @@ contract CreamPaiToken is ERC20Base {
         );
     }
 
+    // Change wallet marketing taxes are sent to
     function changeMarketingWallet(
         address newWallet
-    ) public onlyOwner returns (bool) {
+    ) external onlyOwner returns (bool) {
         require(newWallet != DEAD, "LP Pair cannot be DEAD");
-        require(
-            newWallet != address(0),
-            "LP Pair cannot be 0"
-        );
+        require(newWallet != address(0), "LP Pair cannot be 0");
         marketingWallet = newWallet;
+
+        emit MarketingWalletUpdated(newWallet);
         return true;
     }
 
+    // Update tax amounts
     function changeTaxForLiquidityAndMarketing(
         uint256 _taxForLiquidity,
         uint256 _buyTaxForMarketing,
         uint256 _sellTaxForMarketing
-    ) public onlyOwner returns (bool) {
+    ) external onlyOwner returns (bool) {
         require(
-            (_taxForLiquidity + _buyTaxForMarketing) <= 10,
+            (_taxForLiquidity + _buyTaxForMarketing) < 11,
             "Max tax is 10%"
         );
         require(
-            (_taxForLiquidity + _sellTaxForMarketing) <= 10,
+            (_taxForLiquidity + _sellTaxForMarketing) < 11,
             "Max tax is 10%"
         );
         taxForLiquidity = _taxForLiquidity;
         buyTaxForMarketing = _buyTaxForMarketing;
         sellTaxForMarketing = _sellTaxForMarketing;
 
+        emit TaxUpdated(
+            _taxForLiquidity,
+            _buyTaxForMarketing,
+            _sellTaxForMarketing
+        );
         return true;
     }
 
+    // Update thresholds for when tax token
+    // reserves should be swapped for eth
     function changeSwapThresholds(
         uint256 _numTokensSellToAddToLiquidity,
         uint256 _numTokensSellToAddToETH
-    ) public onlyOwner returns (bool) {
+    ) external onlyOwner returns (bool) {
         require(
             _numTokensSellToAddToLiquidity < _supply / 98,
             "Max 2% of total supply"
@@ -280,24 +298,30 @@ contract CreamPaiToken is ERC20Base {
             10 ** _decimals;
         numTokensSellToAddToETH = _numTokensSellToAddToETH * 10 ** _decimals;
 
+        emit SwapThresholdUpdated(
+            _numTokensSellToAddToLiquidity,
+            _numTokensSellToAddToETH
+        );
         return true;
     }
 
+    // Update the max transaction amount
     function changeMaxTxAmount(
         uint256 _maxTxAmount
-    ) public onlyOwner returns (bool) {
+    ) external onlyOwner returns (bool) {
         maxTxAmount = _maxTxAmount;
 
+        emit MaxTransactionAmountUpdated(_maxTxAmount);
         return true;
     }
 
+    // Update the max tokens stored in a single wallet
     function changeMaxWalletAmount(
         uint256 _maxWalletAmount
-    ) public onlyOwner returns (bool) {
+    ) external onlyOwner returns (bool) {
         maxWalletAmount = _maxWalletAmount;
 
+        emit MaxWalletAmountUpdated(_maxWalletAmount);
         return true;
     }
-
-    receive() external payable {}
 }
