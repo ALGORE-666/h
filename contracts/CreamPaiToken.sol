@@ -5,25 +5,38 @@ import "@thirdweb-dev/contracts/base/ERC20Base.sol";
 import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
 import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol";
 
+/*
+ * Website: https://creampai.org
+ * Litepaper: https://creampai-org.gitbook.io/creampai/
+ * Twitter: https://twitter.com/Real_CreamPAI
+ * Telegram: t.me/real_creampai
+ * OnlyFans: https://onlyfans.com/real_creampai
+*/
 contract CreamPaiToken is ERC20Base {
-    string private _name = "CreamPAI | CreamPAI.org";
-    string private _symbol = "CreamPAI";
+    string private _name = "CreamPAI";
+    string private _symbol = "PAI";
     uint8 private _decimals = 18;
     uint256 private _supply = 69000000000;
     uint256 public taxForLiquidity = 47;
     uint256 public sellTaxForMarketing = 47;
     uint256 public buyTaxForMarketing = 47;
-    uint256 public maxTxAmount = 250000001 * 10 ** _decimals;
-    uint256 public maxWalletAmount = 250000001 * 10 ** _decimals;
-    address public marketingWallet = 0x6Fe13903740d78296D70252f8498d4B82f1fA671;
+    uint256 public maxTxAmount = 690000000 * 10 ** _decimals;
+    uint256 public maxWalletAmount = 690000000 * 10 ** _decimals;
+    address public marketingWallet = 0x7Dd8271a9441f4dd9D6344571a626ec9fC167972;
     address public DEAD = 0x000000000000000000000000000000000000dEaD;
     uint256 public _marketingReserves = 0;
     mapping(address => bool) public _isExcludedFromFee;
-    uint256 public numTokensSellToAddToLiquidity = 200000 * 10 ** _decimals;
-    uint256 public numTokensSellToAddToETH = 100000 * 10 ** _decimals;
+    uint256 public numTokensSellToAddToLiquidity = 1380000 * 10 ** _decimals;
+    uint256 public numTokensSellToAddToETH = 690000 * 10 ** _decimals;
     event ExcludedFromFeeUpdated(address _address, bool _status);
     event PairUpdated(address _address);
 
+    mapping (address => bool) public whitelisted;
+    bool public publicTradingActive = false;
+    event SetWhitelisted(address _address, bool _isExempt);
+    event PublicTradingStarted();
+
+    
     IUniswapV2Router02 public immutable uniswapV2Router;
     address public uniswapV2Pair;
 
@@ -53,8 +66,12 @@ contract CreamPaiToken is ERC20Base {
         uniswapV2Router = _uniswapV2Router;
 
         _isExcludedFromFee[address(uniswapV2Router)] = true;
+        _isExcludedFromFee[address(this)] = true;
         _isExcludedFromFee[msg.sender] = true;
         _isExcludedFromFee[marketingWallet] = true;
+
+        whitelisted[msg.sender] = true;
+        whitelisted[address(this)] = true;
     }
 
     function updatePair(address _pair) external onlyOwner {
@@ -65,6 +82,12 @@ contract CreamPaiToken is ERC20Base {
         );
         uniswapV2Pair = _pair;
         emit PairUpdated(_pair);
+    }
+
+    function setWhitelisted(address _address, bool _isWhitelisted) external onlyOwner {
+        require(_address != address(0), "Zero Address");
+        whitelisted[_address] = _isWhitelisted;
+        emit SetWhitelisted(_address, _isWhitelisted);
     }
 
     function _transfer(
@@ -78,6 +101,13 @@ contract CreamPaiToken is ERC20Base {
             balanceOf(from) >= amount,
             "ERC20: transfer amount exceeds balance"
         );
+
+        if(whitelisted[from] || whitelisted[to]){
+            super._transfer(from,to,amount);
+            return;
+        }
+
+        require(publicTradingActive, "Trading not active");
 
         if (
             (from == uniswapV2Pair || to == uniswapV2Pair) && !inSwapAndLiquify
@@ -138,6 +168,11 @@ contract CreamPaiToken is ERC20Base {
         } else {
             super._transfer(from, to, amount);
         }
+    }
+
+    function enablePublicTrading() external onlyOwner {
+        publicTradingActive = true;
+        emit PublicTradingStarted();
     }
 
     function excludeFromFee(address _address, bool _status) external onlyOwner {
